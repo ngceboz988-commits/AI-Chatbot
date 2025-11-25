@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Powered Chatbot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+        .chat-container { max-height: 70vh; overflow-y: auto; scroll-behavior: smooth; }
+        .user-message { background-color: #3b82f6; color: white; border-bottom-right-radius: 0; }
+        .bot-message { background-color: #ffffff; color: #1f2937; border-bottom-left-radius: 0; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); }
+        .loading-dot { animation: dot-pulse 1.5s infinite ease-in-out; }
+        .loading-dot:nth-child(2) { animation-delay: 0.5s; }
+        .loading-dot:nth-child(3) { animation-delay: 1s; }
+        @keyframes dot-pulse {
+            0%, 100% { opacity: 0.2; transform: scale(0.8); }
+            50% { opacity: 1; transform: scale(1.1); }
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { 'primary': '#3b82f6' }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="p-4 sm:p-8 flex flex-col items-center">
+
+    <div class="w-full max-w-3xl bg-white rounded-xl shadow-2xl p-6 md:p-8">
+        <h1 class="text-3xl font-extrabold text-center text-primary mb-6">Cloud-Deployed AI Chatbot</h1>
+        <p class="text-center text-gray-500 mb-8">Ask me anything! Demonstrating integration with the Gemini API for natural language understanding.</p>
+
+        <!-- Chat Log -->
+        <div id="chat-log" class="chat-container space-y-4 p-4 mb-6 rounded-lg bg-gray-50 border border-gray-200">
+            <!-- Initial Bot Message -->
+            <div class="flex justify-start">
+                <div class="bot-message max-w-xs sm:max-w-md p-3 rounded-xl text-sm">
+                    Hello! I'm an AI assistant designed to demonstrate API integration and cloud deployment. How can I help you today?
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="flex space-x-3">
+            <input type="text" id="user-input" placeholder="Type your message here..."
+                   class="flex-grow p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary transition duration-200">
+            <button id="send-button"
+                    class="bg-primary text-white font-semibold py-3 px-6 rounded-xl shadow-md hover:bg-blue-700 transition duration-300 disabled:opacity-50">
+                Send
+            </button>
+        </div>
+
+        <!-- Loading Indicator / Status Message -->
+        <div id="status-message" class="text-center mt-4 text-sm text-gray-600 h-6"></div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // --- API & Utility Configuration ---
+        const API_KEY = ""; // Canvas will automatically provide the key if left empty
+        const MODEL = "gemini-2.5-flash-preview-09-2025";
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+        const MAX_RETRIES = 5;
+
+        // --- DOM Elements ---
+        const chatLog = document.getElementById('chat-log');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const statusMessage = document.getElementById('status-message');
+
+        let chatHistory = [];
+        let isProcessing = false;
+
+        // --- UI Functions ---
+        function appendMessage(text, isUser = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = `max-w-xs sm:max-w-md p-3 rounded-xl text-sm ${isUser ? 'user-message' : 'bot-message'}`;
+            contentDiv.innerHTML = text.replace(/\n/g, '<br>'); // Handle new lines
+            
+            messageDiv.appendChild(contentDiv);
+            chatLog.appendChild(messageDiv);
+            chatLog.scrollTop = chatLog.scrollHeight; // Scroll to bottom
+        }
+
+        function showLoading() {
+            statusMessage.innerHTML = '<span class="flex items-center justify-center space-x-1 text-primary"><span>AI is typing</span><span class="loading-dot">.</span><span class="loading-dot">.</span><span class="loading-dot">.</span></span>';
+            sendButton.disabled = true;
+            isProcessing = true;
+        }
+
+        function hideLoading(message = '') {
+            statusMessage.textContent = message;
+            sendButton.disabled = false;
+            isProcessing = false;
+        }
+
+        // --- Core Chat Logic ---
+        async function sendMessage() {
+            if (isProcessing) return;
+            const message = userInput.value.trim();
+            if (message === "") return;
+
+            appendMessage(message, true); // Display user message
+            chatHistory.push({ role: "user", parts: [{ text: message }] });
+
+            userInput.value = ''; // Clear input
+            showLoading();
+
+            try {
+                const botResponse = await callGeminiApi(chatHistory);
+                appendMessage(botResponse.text);
+
+                // Update chat history with the bot's response for context
+                chatHistory.push({ role: "model", parts: [{ text: botResponse.text }] });
+
+                hideLoading('');
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                const errorMessage = "Sorry, I ran into an error. Please try again.";
+                appendMessage(errorMessage);
+                chatHistory.push({ role: "model", parts: [{ text: errorMessage }] });
+                hideLoading('Connection Error');
+            }
+        }
+
+        // --- API Integration with Exponential Backoff ---
+        async function callGeminiApi(history) {
+            const payload = {
+                contents: history,
+                systemInstruction: {
+                    parts: [{ text: "You are a helpful and concise AI assistant built for an Oracle Cloud-deployed web application. Keep your answers brief and professional." }]
+                }
+            };
+            
+            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429 && attempt < MAX_RETRIES - 1) {
+                            // Rate limit exceeded, implement exponential backoff
+                            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            continue; // Retry
+                        }
+                        throw new Error(`API response failed with status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    
+                    if (text) {
+                        return { text };
+                    } else {
+                        throw new Error("Received an empty response from the API.");
+                    }
+
+                } catch (error) {
+                    if (attempt === MAX_RETRIES - 1) {
+                        throw error; // Re-throw if all retries failed
+                    }
+                    // Wait before retrying (exponential backoff)
+                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+        // --- Event Listeners ---
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
